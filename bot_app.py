@@ -142,12 +142,32 @@ def build_pnl_card_bytes(payload: dict) -> io.BytesIO | None:
         FOOTER_RULE_W = 2
         DEFAULT_HANDLE = "x.com/tryheyanna"
 
-        dejavu_regular = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
-        dejavu_bold = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
+        # Search multiple font paths (Linux, macOS, bundled assets)
+        _font_candidates_regular = [
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+            "/System/Library/Fonts/Helvetica.ttc",
+            "/System/Library/Fonts/SFNSText.ttf",
+            os.path.join(ASSETS_DIR, "DejaVuSans.ttf"),
+        ]
+        _font_candidates_bold = [
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+            "/System/Library/Fonts/Helvetica.ttc",
+            "/System/Library/Fonts/SFNSText.ttf",
+            os.path.join(ASSETS_DIR, "DejaVuSans-Bold.ttf"),
+        ]
+
+        def _find_font(candidates):
+            for fp in candidates:
+                if os.path.exists(fp):
+                    return fp
+            return None
+
+        dejavu_regular = _find_font(_font_candidates_regular)
+        dejavu_bold = _find_font(_font_candidates_bold)
 
         def _font(size: int, bold: bool = False) -> ImageFont.ImageFont:
             fp = dejavu_bold if bold else dejavu_regular
-            if os.path.exists(fp):
+            if fp:
                 try:
                     return ImageFont.truetype(fp, size=size)
                 except Exception:
