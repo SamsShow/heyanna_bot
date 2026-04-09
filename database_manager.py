@@ -1091,6 +1091,17 @@ class DatabaseManager:
                 (cfg_json, hook_id),
             )
 
+    def update_global_copy_hook_config(self, hook_id: int, config: dict) -> None:
+        """Persist updated config JSON for a global copy hook (copy_hooks table)."""
+        import json
+
+        cfg_json = json.dumps(config or {})
+        with self.transaction() as conn:
+            conn.execute(
+                "UPDATE copy_hooks SET config = ? WHERE id = ?;",
+                (cfg_json, hook_id),
+            )
+
     def delete_copy_hook(self, follower_user_id: int, leader_user_id: int) -> bool:
         """Remove a copy-trading hook (unfollow)."""
         with self.transaction() as conn:

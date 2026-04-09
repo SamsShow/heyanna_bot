@@ -21,6 +21,7 @@ dependencies = [
     "mcp>=1.26.0",
     "openai>=2.24.0",
     "openpyxl>=3.1.0",
+    "Pillow>=10.0.0",
     "py-builder-relayer-client>=0.0.1",
     "py-builder-signing-sdk>=0.0.2",
     "py-clob-client>=0.34.6",

@@ -1527,6 +1527,13 @@ def create_api_app(db: DatabaseManager) -> FastAPI:
                 f"Amount=${amount_usd:.2f} Condition={condition_id[:20]}... Side={order_side}"
             )
 
+            # Resolve leader's user_id from their wallet address for attribution
+            copied_from_user_id = None
+            if leader_address:
+                leader_user = db.get_user_by_address(leader_address)
+                if leader_user:
+                    copied_from_user_id = leader_user["user_id"]
+
             # Execute the trade; pass token_id/outcome_index so we use market's outcome name
             result = await asyncio.to_thread(
                 execute_trade_for_user,
@@ -1536,15 +1543,17 @@ def create_api_app(db: DatabaseManager) -> FastAPI:
                 amount_usd,
                 condition_id,
                 order_side,
-                copied_from_user_id=None,
+                copied_from_user_id=copied_from_user_id,
                 token_id=token_id,
                 outcome_index=outcome_index,
             )
 
             logging.getLogger(__name__).info(f"[COPY TRADE] Result: {result}")
+            return result
 
         except Exception as e:
             logging.getLogger(__name__).error(f"Copy trade execution error: {e}", exc_info=True)
+            return f"Error: {e}"
 
     async def _global_copy_trading_loop_websocket():
         """
@@ -3010,10 +3019,13 @@ def create_api_app(db: DatabaseManager) -> FastAPI:
                 "UPDATE users SET copy_trading_enabled = 1 WHERE user_id = ?;",
                 (current["user_id"],),
             )
-            # Also mark all hooks for this follower as enabled so the global
-            # copy-trading indexer (_run_global_copy_trading_tick) will pick them up.
+            # Enable hooks in both tables so all copy-trading paths pick them up.
             conn.execute(
                 "UPDATE copy_hooks SET enabled = 1 WHERE follower_user_id = ?;",
+                (current["user_id"],),
+            )
+            conn.execute(
+                "UPDATE copy_trading_hooks SET enabled = 1 WHERE follower_user_id = ?;",
                 (current["user_id"],),
             )
         return {"copy_trading_enabled": True}
@@ -3048,10 +3060,13 @@ def create_api_app(db: DatabaseManager) -> FastAPI:
                 "UPDATE users SET copy_trading_enabled = 0 WHERE user_id = ?;",
                 (current["user_id"],),
             )
-            # Disable all hooks for this follower so the global indexer
-            # stops mirroring trades for them.
+            # Disable hooks in both tables so all copy-trading paths stop.
             conn.execute(
                 "UPDATE copy_hooks SET enabled = 0 WHERE follower_user_id = ?;",
+                (current["user_id"],),
+            )
+            conn.execute(
+                "UPDATE copy_trading_hooks SET enabled = 0 WHERE follower_user_id = ?;",
                 (current["user_id"],),
             )
         return {"copy_trading_enabled": False}
@@ -5574,6 +5589,12 @@ def create_api_app(db: DatabaseManager) -> FastAPI:
         tasks = []
         for h in hooks:
             follower_id = int(h["follower_user_id"])
+
+            # Skip followers who have copy trading disabled
+            follower_user = db.get_user(follower_id)
+            if not follower_user or not follower_user.get("copy_trading_enabled"):
+                continue
+
             cfg = h.get("config") or {}
 
             mode = (cfg.get("mode") or "").lower()
@@ -5785,6 +5806,10 @@ def create_api_app(db: DatabaseManager) -> FastAPI:
             if not isinstance(trades_raw, list):
                 continue
 
+            # Resolve leader's user_id once per address (not per trade)
+            leader_user = db.get_user_by_address(leader_addr)
+            leader_uid = leader_user["user_id"] if leader_user else None
+
             trades_sorted = sorted(
                 [t for t in trades_raw if isinstance(t, dict)],
                 key=_ts,
@@ -5853,13 +5878,13 @@ def create_api_app(db: DatabaseManager) -> FastAPI:
                         follower_amt,
                         cond_id,
                         order_side,
-                        copied_from_user_id=None,
+                        copied_from_user_id=leader_uid,
                     )
                     total_trades += 1
 
                 max_ts = max(( _ts(t) for t in new_trades ), default=last_seen_ts)
                 cfg["last_seen_ts"] = max_ts
-                db.update_copy_hook_config(int(h["id"]), cfg)
+                db.update_global_copy_hook_config(int(h["id"]), cfg)
                 total_hooks += 1
 
         return {"processed_hooks": total_hooks, "mirrored_trades": total_trades}
